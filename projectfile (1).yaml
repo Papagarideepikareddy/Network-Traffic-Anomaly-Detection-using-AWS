@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for S3 bucket traffic anomaly detection with SNS alerts
+
+Parameters:
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select an existing VPC for Flow Logs
+  EmailAddress:
+    Type: String
+    Description: Email address to receive SNS alerts
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid email address
+
+Resources:
+  # S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub s3-traffic-monitor-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Purpose
+          Value: TrafficMonitoring
+
+  # IAM Role for VPC Flow Logs
+  FlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FlowLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # CloudWatch Log Group for Flow Logs
+  FlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/vpc/flow-logs
+      RetentionInDays: 7
+
+  # VPC Flow Logs
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceId: !Ref VPCId
+      ResourceType: VPC
+      TrafficType: ALL
+      LogDestinationType: 'cloud-watch-logs'
+      LogGroupName: !Ref FlowLogGroup
+      DeliverLogsPermissionArn: !GetAtt FlowLogsRole.Arn
+
+  # CloudWatch Metric Filter for Anomaly Detection
+  TrafficAnomalyFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref FlowLogGroup
+      FilterPattern: '[version, account_id, interface_id, srcaddr, dstaddr, srcport, dstport, protocol, packets, bytes, start, end, action, log_status]'
+      MetricTransformations:
+        - MetricName: FlowCount
+          MetricNamespace: VPCTraffic
+          MetricValue: '1'
+
+  # SNS Topic for Alerts
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: TrafficAnomalyAlerts
+      TopicName: TrafficAnomalyAlerts
+
+  # SNS Subscription for Email
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref SNSTopic
+      Endpoint: !Ref EmailAddress
+
+  # CloudWatch Alarm for Anomaly Detection
+  TrafficAnomalyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: S3TrafficAnomalyAlarm
+      AlarmDescription: Triggers when the number of flow logs exceeds 100 in a 3-minute period, indicating unusual network activity. This alarm does NOT directly monitor S3 access logs, but rather VPC Flow Logs. It detects unusual network traffic volume within your VPC, which *could* be related to S3 access, but requires careful interpretation.
+      Namespace: VPCTraffic
+      MetricName: FlowCount
+      Statistic: Sum
+      Period: 30
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref SNSTopic
+      TreatMissingData: notBreaching
+
+Outputs:
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref S3Bucket
+  SNSTopicArn:
+    Description: ARN of the SNS topic for alerts
+    Value: !Ref SNSTopic
+  CloudWatchLogGroup:
+    Description: CloudWatch Log Group for Flow Logs
+    Value: !Ref FlowLogGroup
