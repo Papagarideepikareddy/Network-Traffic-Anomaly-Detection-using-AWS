@@ -1,5 +1,5 @@
 # Network-Traffic-Anomaly-Detection-using-AWS
-# Description:
+# Description
 This AWS CloudFormation template sets up VPC Flow Logs with CloudWatch monitoring and SNS email alerts to detect network traffic anomalies. It creates an S3 bucket, IAM roles, CloudWatch Log Group with metric filters, alarms for unusual traffic patterns, and an SNS topic for notifications. This infrastructure helps identify and respond to potential security or operational issues in your VPC traffic.
 # Overview
 This repository contains an AWS CloudFormation template that provisions the core infrastructure to monitor VPC network traffic anomalies using VPC Flow Logs, CloudWatch, and SNS email alerts. This setup helps detect unusual network traffic patterns that could indicate security issues, misconfigurations, or unexpected spikes in usage.
